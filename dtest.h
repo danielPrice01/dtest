@@ -139,7 +139,7 @@ int run_tests(int8_t flag) {
       buf[n] = '\0';
     }
 
-    Result result;
+    Result result = FAILED;
     if (WIFEXITED(status)) {
       if (WEXITSTATUS(status) != 0) {
         result = FAILED;
@@ -159,7 +159,7 @@ int run_tests(int8_t flag) {
     const char* ansi_col = (result == PASSED) ? "32m" : "31m";
 
     // name ... result
-    printf("%s ... \x1b[%s\%s\x1b[0m\n", curr_test->name, ansi_col,
+    printf("%s ... \x1b[%s%s\x1b[0m\n", curr_test->name, ansi_col,
            enum_to_str(result));
 
     // (debug statements) flag: 0 = none, 1 = verbose, 2 = only on error
