@@ -23,6 +23,5 @@ int main(void) {
     REGISTER_TEST(foo_test);
     REGISTER_TEST(bar_test);
     RUN_TESTS_ERROR
-    return 0;
 }
 ```

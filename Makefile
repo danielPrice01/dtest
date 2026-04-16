@@ -1,5 +1,5 @@
 all:
-	gcc -o test example_tests.c
+	gcc -g -o test example_tests.c
 
 clean:
 	rm test
