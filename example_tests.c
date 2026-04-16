@@ -17,7 +17,10 @@ void test_multiplication_true(void) {
 void test_multiplication_false(void) {
   assert(2 * 2 == 5);
 }
-void test_runs_beyond_timout(void) {
+void test_runs_within_timeout(void) {
+  sleep(1);
+}
+void test_runs_beyond_timeout(void) {
   sleep(100);
 }
 
@@ -26,7 +29,8 @@ int main(void) {
   REGISTER_TEST(test_addition_false);
   REGISTER_TEST(test_multiplication_true);
   REGISTER_TEST(test_multiplication_false);
-  REGISTER_TEST(test_runs_beyond_timout);
+  REGISTER_TEST(test_runs_within_timeout);
+  REGISTER_TEST(test_runs_beyond_timeout);
 
   // RUN_TESTS;
   RUN_TESTS_ERROR;
