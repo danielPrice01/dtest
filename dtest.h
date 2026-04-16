@@ -2,6 +2,7 @@
 #define DTEST_H
 
 #include <fcntl.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -171,7 +172,7 @@ int run_tests(int8_t flag) {
 
   printf("\nTests passed: [%u/%u]\n\n", tests_passed, num_tests);
 
-  return (tests_passed == num_tests);
+  return (tests_passed == num_tests) ? 0 : 1;
 }
 
 void add_test(void (*fn)(void), char* name) {
