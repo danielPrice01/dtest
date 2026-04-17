@@ -1,6 +1,9 @@
 #ifndef DTEST_H
 #define DTEST_H
 
+// TODO make all the passed/failed/timeout end on the same column.
+// accept single test to run just that one
+
 #include <fcntl.h>
 #include <signal.h>
 #include <stdint.h>
@@ -23,25 +26,35 @@ typedef struct {
   pid_t pid;
 } TestCase;
 
-int run_tests(int8_t flag);  // returns 0 when all tests passed, 1 ow
 void add_test(void (*fn)(void), char* name);
 
 // after every test, call REGISTER_TEST to add it to tests that will be executed
 #define REGISTER_TEST(test) add_test(test, #test)
 
-// in main call RUN_TESTS corresponding to how much output you want printed
-#define RUN_TESTS return run_tests(0);
-#define RUN_TESTS_VERBOSE return run_tests(1);
-#define RUN_TESTS_ERROR return run_tests(2);
-
 #ifdef DTEST_IMPL
 
+#ifndef MAX_TESTS
 #define MAX_TESTS 128
+#endif  // MAX_TESTS
+
 #define MAX_MSG_LEN 1024
 
 #ifndef MAX_TIME_PER_TEST
 #define MAX_TIME_PER_TEST 1  // in s
-#endif
+#endif                       // MAX_TIME_PER_TEST
+
+#ifndef PRINT_OUTPUT
+#define PRINT_OUTPUT 1
+#endif  // PRINT_OUTPUT
+
+#ifndef PRINT_PASSED
+#define PRINT_PASSED 0
+#endif  // PRINT_PASSED
+
+int run_tests(void);  // returns 0 when all tests passed, 1 ow
+
+// in main call RUN_TESTS corresponding to how much output you want printed
+#define RUN_TESTS return run_tests();
 
 TestCase tests[MAX_TESTS];
 uint16_t num_tests = 0;
@@ -59,7 +72,7 @@ static inline char* enum_to_str(Result res) {
   }
 }
 
-int run_tests(int8_t flag) {
+int run_tests(void) {
   uint16_t tests_passed = 0;
   printf("\n");
 
@@ -68,7 +81,7 @@ int run_tests(int8_t flag) {
   for (size_t i = 0; i < num_tests; ++i) {
     TestCase* curr_test = &tests[i];
 
-    if (flag != 0) {
+    if (PRINT_OUTPUT) {
       int pipefd[2];
       if (pipe(pipefd) != 0) {
         perror("pipe");
@@ -85,23 +98,23 @@ int run_tests(int8_t flag) {
     } else if (pid == 0) {
       // child
 
-      if (flag == 0) {
-        int devnull_fd = open("/dev/null", O_WRONLY);
-        dup2(devnull_fd, STDOUT_FILENO);
-        dup2(devnull_fd, STDERR_FILENO);
-        close(devnull_fd);
-      } else if (flag != 0) {
+      if (PRINT_OUTPUT) {
         // close read end of pipe and redirect stdout to write end
         close(curr_test->pipefd0);
         dup2(curr_test->pipefd1, STDOUT_FILENO);
         dup2(curr_test->pipefd1, STDERR_FILENO);
+      } else {
+        int devnull_fd = open("/dev/null", O_WRONLY);
+        dup2(devnull_fd, STDOUT_FILENO);
+        dup2(devnull_fd, STDERR_FILENO);
+        close(devnull_fd);
       }
 
       alarm(MAX_TIME_PER_TEST);
 
       curr_test->fn();
 
-      if (flag != 0) {
+      if (PRINT_OUTPUT) {
         close(curr_test->pipefd1);
       }
 
@@ -117,7 +130,7 @@ int run_tests(int8_t flag) {
   for (size_t i = 0; i < num_tests; ++i) {
     TestCase* curr_test = &tests[i];
 
-    if (flag != 0) {
+    if (PRINT_OUTPUT) {
       close(curr_test->pipefd1);
     }
 
@@ -127,7 +140,7 @@ int run_tests(int8_t flag) {
     }
 
     char buf[MAX_MSG_LEN];
-    if (flag != 0) {
+    if (PRINT_OUTPUT) {
       ssize_t n;
       if ((n = read(curr_test->pipefd0, buf, sizeof(buf) - 1)) == -1) {
         perror("read");
@@ -155,6 +168,10 @@ int run_tests(int8_t flag) {
       }
     }
 
+    if (!PRINT_PASSED && result == PASSED) {
+      continue;
+    }
+
     // 31 = red, 32 = green, 33 = yellow
     const char* ansi_col = (result == PASSED) ? "32m" : "31m";
 
@@ -162,10 +179,7 @@ int run_tests(int8_t flag) {
     printf("%s ... \x1b[%s%s\x1b[0m\n", curr_test->name, ansi_col,
            enum_to_str(result));
 
-    // (debug statements) flag: 0 = none, 1 = verbose, 2 = only on error
-    if (flag == 1) {
-      printf("\x1b[33m%s\x1b[0m", buf);
-    } else if (flag == 2 && result == FAILED) {
+    if (PRINT_OUTPUT) {
       printf("\x1b[33m%s\x1b[0m", buf);
     }
   }
@@ -176,6 +190,10 @@ int run_tests(int8_t flag) {
 }
 
 void add_test(void (*fn)(void), char* name) {
+  if (num_tests == MAX_TESTS) {
+    return;
+  }
+
   TestCase* new_test = &tests[num_tests];
   new_test->name = name;
   new_test->fn = fn;
