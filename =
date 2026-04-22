@@ -77,10 +77,6 @@ void add_test(void (*fn)(void), char* name);
 
 int run_tests(int argc, char** argv);  // returns 0 when all tests passed, 1 ow
 
-/*
- * Fixed macros
- */
-
 // GET_RUN_TEST expands to be equal to the 6th value (index = 5)
 #define GET_RUN_TEST(_0, _1, _2, _3, _4, CHOSEN_TEST_TYPE, ...) CHOSEN_TEST_TYPE
 
@@ -100,61 +96,41 @@ int run_tests(int argc, char** argv);  // returns 0 when all tests passed, 1 ow
 #define RUN_TESTS_YES_ARGS(argc, argv) return run_tests(argc, argv);
 #define BAD_TEST(...) RUN_TESTS_requires_0_or_2_arguments
 
-#define MAX_RESULT_LEN (9)
-#define PERIOD_PADDING (5)
-#define SPACE_PADDING (1)
-#define MAX_FINAL_COL \
-  (MAX_TEST_NAME_LEN + PERIOD_PADDING + (2 * SPACE_PADDING) + MAX_RESULT_LEN)
+// " ... " = 5
+// strlen("timed out") = 9
+// '\0' = 1
+#define MAX_FINAL_COL ((MAX_TEST_NAME_LEN) + 5 + 9 + 1)
 
 TestCase tests[MAX_TESTS];
 uint16_t num_tests = 0;
 
 size_t max_len = 0;
 
-static inline void res_to_str_col_len(Result res,
-                                      char** result_str,
-                                      char** ansi_col,
-                                      size_t* result_len) {
+// TODO make all the passed/failed/timeout end on the same column.
+
+static inline char* enum_to_str(Result res) {
   switch (res) {
     case PASSED:
-      *result_str = "passed";
-      *ansi_col = "32m";
-      *result_len = 6;
-      return;
-
+      return "passed";
     case FAILED:
-      *result_str = "failed";
-      *ansi_col = "31m";
-      *result_len = 6;
-      return;
-
+      return "failed";
     case TIMEOUT:
-      *result_str = "timed out";
-      *ansi_col = "31m";
-      *result_len = 9;
-      return;
-
+      return "timed out";
     default:
-      *result_str = "ERROR";
-      *ansi_col = "31m";
-      *result_len = 5;
-      return;
+      return "ERROR";
   }
 }
 
-static inline void format_result(char* formatted_result,
-                                 size_t final_space,
-                                 TestCase* curr_test) {
-  for (size_t i = 0; i < final_space; ++i) {
-    if (i < curr_test->name_len) {
-      formatted_result[i] = curr_test->name[i];
-    } else if (i == curr_test->name_len) {
-      formatted_result[i] = ' ';
-    } else if (i == final_space - 1) {
-      formatted_result[i] = ' ';
-    } else if (i > curr_test->name_len) {
-      formatted_result[i] = '.';
-    }
+static inline size_t result_to_len(Result res) {
+  switch (res) {
+    case PASSED:
+      return "passed";
+    case FAILED:
+      return "failed";
+    case TIMEOUT:
+      return "timed out";
+    default:
+      return "ERROR";
   }
 }
 
@@ -165,8 +141,7 @@ int run_tests(int argc, char** argv) {
     // END_GROUP)
   }
 
-  size_t final_col =
-      max_len + PERIOD_PADDING + SPACE_PADDING + MAX_RESULT_LEN + 1;
+  size_t col_end_print = max_len + 5 + 9 + 1;
 
   uint16_t tests_passed = 0;
   printf("\n");
@@ -235,16 +210,16 @@ int run_tests(int argc, char** argv) {
     }
 
     char buf[MAX_MSG_LEN];
-    ssize_t buf_read_n;
     if (PRINT_OUTPUT) {
-      if ((buf_read_n = read(curr_test->pipefd0, buf, sizeof(buf) - 1)) == -1) {
+      ssize_t n;
+      if ((n = read(curr_test->pipefd0, buf, sizeof(buf) - 1)) == -1) {
         perror("read");
       }
       close(curr_test->pipefd0);
-      if (buf_read_n == -1) {
+      if (n == -1) {
         continue;
       }
-      buf[buf_read_n] = '\0';
+      buf[n] = '\0';
     }
 
     Result result = FAILED;
@@ -267,26 +242,32 @@ int run_tests(int argc, char** argv) {
       continue;
     }
 
-    char* ansi_col;  // 31 = red, 32 = green, 33 = yellow
-    char* result_str;
-    size_t result_len;
+    // 31 = red, 32 = green, 33 = yellow
+    const char* ansi_col = (result == PASSED) ? "32m" : "31m";
 
-    res_to_str_col_len(result, &result_str, &ansi_col, &result_len);
+    char* result_str = enum_to_str(result);
+    // size_t result_str_len = result_to_len(result);
 
-    // consists of test name, and necessary number of '.' as padding for all
-    // results to end on same column
-    size_t final_space = final_col - MAX_RESULT_LEN;
+    // TODO format str, make into inline func later
+    // first is test name
+    // then a space
+    // then . until
+    // then a space
+    // then result_str
     char formatted_result[MAX_FINAL_COL];
-    format_result(formatted_result, final_space, curr_test);
+    for (size_t i = 0; i < col_end_print; ++i) {
+      if (i < curr_test->name_len) {
+        formatted_result[i] = curr_test->name[i];
+      } else if (i == curr_test->name_len) {
+        formatted_result[i] = ' ';
+      }
+    }
 
     // name ... result
-    printf("%.*s\x1b[%s%s\x1b[0m\n", (int)final_space, formatted_result,
-           ansi_col, result_str);
+    printf("%s ... \x1b[%s%s\x1b[0m\n", curr_test->name, ansi_col,
+           enum_to_str(result));
 
     if (PRINT_OUTPUT) {
-      if (buf_read_n) {
-        printf("\x1b[33m> \x1b[0m");
-      }
       printf("\x1b[33m%s\x1b[0m", buf);
     }
   }

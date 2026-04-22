@@ -2,7 +2,7 @@
 
 #define DTEST_IMPL
 #define MAX_TIME_PER_TEST 2  // redefine to change timeout length
-#define PRINT_PASSED 1
+#define PRINT_PASSED 0
 #define PRINT_OUTPUT 0
 
 #include "dtest.h"
@@ -26,7 +26,7 @@ void test_runs_beyond_timeout(void) {
   sleep(100);
 }
 
-int main(void) {
+int main(int argc, char** argv) {
   REGISTER_TEST(test_addition_true);
   REGISTER_TEST(test_addition_false);
   REGISTER_TEST(test_multiplication_true);
@@ -34,5 +34,6 @@ int main(void) {
   REGISTER_TEST(test_runs_within_timeout);
   REGISTER_TEST(test_runs_beyond_timeout);
 
-  RUN_TESTS;
+  // RUN_TESTS(); // THIS WORKS AS WELL
+  RUN_TESTS(argc, argv);
 }
