@@ -2,8 +2,8 @@
 
 #define DTEST_IMPL
 #define MAX_TIME_PER_TEST 2  // redefine to change timeout length
-#define PRINT_PASSED 0
-#define PRINT_OUTPUT 0
+#define PRINT_PASSED 1
+#define PRINT_OUTPUT 1
 
 #include "dtest.h"
 

@@ -3,6 +3,9 @@
 
 #include <unistd.h>
 
+// TODO custom assert commands, that are more descriptive. Get a sense of what
+// the output for things are, print out what line and file they failed on
+
 /*
  * Visible when calling #include "dtest.h" but without #define DTEST_IMPL_
  * before
@@ -18,12 +21,11 @@ typedef struct {
   void (*fn)(void);
   char* name;
   size_t name_len;
-  int pipefd0;
-  int pipefd1;
+  int pipefd[2];
   pid_t pid;
 } TestCase;
 
-void add_test(void (*fn)(void), char* name);
+void add_test(void (*fn)(void), const char* name);
 
 // after every test, call REGISTER_TEST to add it to tests that will be executed
 #define REGISTER_TEST(test) add_test(test, #test)
@@ -75,7 +77,8 @@ void add_test(void (*fn)(void), char* name);
  * accept input from stdin to run group of tests, or individual tests
  */
 
-int run_tests(int argc, char** argv);  // returns 0 when all tests passed, 1 ow
+int run_tests(const int argc,
+              const char** argv);  // returns 0 when all tests passed, 1 ow
 
 /*
  * Fixed macros
@@ -94,10 +97,12 @@ int run_tests(int argc, char** argv);  // returns 0 when all tests passed, 1 ow
 // a function or function pointer"
 #define RUN_TESTS(...)                                                   \
   GET_RUN_TEST(_, ##__VA_ARGS__, BAD_TEST, BAD_TEST, RUN_TESTS_YES_ARGS, \
-               BAD_TEST, RUN_TESTS_NO_ARGS)(__VA_ARGS__)
+               BAD_TEST, RUN_TESTS_NO_ARGS)                              \
+  (__VA_ARGS__)
 
 #define RUN_TESTS_NO_ARGS() return run_tests(0, NULL);
-#define RUN_TESTS_YES_ARGS(argc, argv) return run_tests(argc, argv);
+#define RUN_TESTS_YES_ARGS(argc, argv) \
+  return run_tests((const int)argc, (const char**)argv);
 #define BAD_TEST(...) RUN_TESTS_requires_0_or_2_arguments
 
 #define MAX_RESULT_LEN (9)
@@ -111,7 +116,24 @@ uint16_t num_tests = 0;
 
 size_t max_len = 0;
 
-static inline void res_to_str_col_len(Result res,
+static inline int string_compare(const void* item, const void* to_compare_to) {
+  return strncmp((const char*)item, (const char*)to_compare_to,
+                 MAX_TEST_NAME_LEN);
+}
+
+static inline int32_t find_index(
+    const char* elt,
+    int (*comparator_fn)(const void* item, const void* to_compare_to)) {
+  for (int32_t i = 0; i < num_tests; ++i) {
+    if (comparator_fn(elt, tests[i].name) == 0) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+static inline void res_to_str_col_len(const Result res,
                                       char** result_str,
                                       char** ansi_col,
                                       size_t* result_len) {
@@ -143,8 +165,8 @@ static inline void res_to_str_col_len(Result res,
 }
 
 static inline void format_result(char* formatted_result,
-                                 size_t final_space,
-                                 TestCase* curr_test) {
+                                 const size_t final_space,
+                                 const TestCase* curr_test) {
   for (size_t i = 0; i < final_space; ++i) {
     if (i < curr_test->name_len) {
       formatted_result[i] = curr_test->name[i];
@@ -158,11 +180,43 @@ static inline void format_result(char* formatted_result,
   }
 }
 
-int run_tests(int argc, char** argv) {
+int run_tests(const int argc, const char** argv) {
+  uint16_t tests_found = 0;
   if (argc > 1) {
     // TODO implement calling individual tests
     // TODO implement calling groups of tests (make new macros, START_GROUP,
     // END_GROUP)
+
+    // TODO implement a sorting algo if there are enough things that are being
+    // checked
+
+    uint16_t left_idx = 0;
+    int32_t right_idx = 0;
+
+    for (int i = 1; i < argc; ++i) {
+      // call a "finding" function to return the index
+      right_idx = find_index(argv[i], string_compare);
+
+      if (right_idx == -1) {
+        printf("Test '%s' not found\n", argv[i]);
+        continue;
+      } else if (right_idx > left_idx) {
+        TestCase tmp = tests[right_idx];
+        tests[right_idx] = tests[left_idx];
+        tests[left_idx] = tmp;
+      }
+
+      left_idx++;
+      tests_found++;
+    }
+  }
+
+  if (tests_found == 0 && argc > 1) {
+    return 1;
+  }
+
+  if (tests_found > 0) {
+    num_tests = tests_found;
   }
 
   size_t final_col =
@@ -173,7 +227,7 @@ int run_tests(int argc, char** argv) {
 
   // iterate through each test, fork (isolation in case of segfault), redirect
   // output, and call the function
-  for (size_t i = 0; i < num_tests; ++i) {
+  for (uint16_t i = 0; i < num_tests; ++i) {
     TestCase* curr_test = &tests[i];
 
     if (PRINT_OUTPUT) {
@@ -182,8 +236,8 @@ int run_tests(int argc, char** argv) {
         perror("pipe");
       }
 
-      curr_test->pipefd0 = pipefd[0];
-      curr_test->pipefd1 = pipefd[1];
+      curr_test->pipefd[0] = pipefd[0];
+      curr_test->pipefd[1] = pipefd[1];
     }
 
     pid_t pid = fork();
@@ -195,9 +249,9 @@ int run_tests(int argc, char** argv) {
 
       if (PRINT_OUTPUT) {
         // close read end of pipe and redirect stdout to write end
-        close(curr_test->pipefd0);
-        dup2(curr_test->pipefd1, STDOUT_FILENO);
-        dup2(curr_test->pipefd1, STDERR_FILENO);
+        close(curr_test->pipefd[0]);
+        dup2(curr_test->pipefd[1], STDOUT_FILENO);
+        dup2(curr_test->pipefd[1], STDERR_FILENO);
       } else {
         int devnull_fd = open("/dev/null", O_WRONLY);
         dup2(devnull_fd, STDOUT_FILENO);
@@ -210,7 +264,7 @@ int run_tests(int argc, char** argv) {
       curr_test->fn();
 
       if (PRINT_OUTPUT) {
-        close(curr_test->pipefd1);
+        close(curr_test->pipefd[1]);
       }
 
       _exit(0);
@@ -222,11 +276,11 @@ int run_tests(int argc, char** argv) {
 
   // iterate through each test, read from read end of pipe, print requested
   // output
-  for (size_t i = 0; i < num_tests; ++i) {
+  for (uint16_t i = 0; i < num_tests; ++i) {
     TestCase* curr_test = &tests[i];
 
     if (PRINT_OUTPUT) {
-      close(curr_test->pipefd1);
+      close(curr_test->pipefd[1]);
     }
 
     int status = 0;
@@ -237,10 +291,11 @@ int run_tests(int argc, char** argv) {
     char buf[MAX_MSG_LEN];
     ssize_t buf_read_n;
     if (PRINT_OUTPUT) {
-      if ((buf_read_n = read(curr_test->pipefd0, buf, sizeof(buf) - 1)) == -1) {
+      if ((buf_read_n = read(curr_test->pipefd[0], buf, sizeof(buf) - 1)) ==
+          -1) {
         perror("read");
       }
-      close(curr_test->pipefd0);
+      close(curr_test->pipefd[0]);
       if (buf_read_n == -1) {
         continue;
       }
@@ -296,7 +351,7 @@ int run_tests(int argc, char** argv) {
   return (tests_passed == num_tests) ? 0 : 1;
 }
 
-void add_test(void (*fn)(void), char* name) {
+void add_test(void (*fn)(void), const char* name) {
   if (num_tests == MAX_TESTS) {
     printf("Skipped test [max number of tests reached]\n");
     return;
@@ -308,7 +363,7 @@ void add_test(void (*fn)(void), char* name) {
   }
 
   TestCase* new_test = &tests[num_tests];
-  new_test->name = name;
+  new_test->name = (char*)name;
   new_test->name_len = name_len;
   new_test->fn = fn;
 

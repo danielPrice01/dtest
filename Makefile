@@ -1,5 +1,5 @@
 all:
-	gcc -g -Wall -Wextra -Wpedantic -o test example_tests.c
+	gcc -g -Wall -Wextra -Wpedantic -Wno-gnu -o test example_tests.c
 
 clean:
 	rm test
