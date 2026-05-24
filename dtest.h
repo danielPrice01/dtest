@@ -1,6 +1,7 @@
 #ifndef DTEST_H
 #define DTEST_H
 
+#include <stdint.h>
 #include <unistd.h>
 
 // TODO custom assert commands, that are more descriptive. Get a sense of what
@@ -10,20 +11,6 @@
  * Visible when calling #include "dtest.h" but without #define DTEST_IMPL_
  * before
  */
-
-typedef enum {
-  PASSED,
-  FAILED,
-  TIMEOUT,
-} Result;
-
-typedef struct {
-  void (*fn)(void);
-  char* name;
-  size_t name_len;
-  int pipefd[2];
-  pid_t pid;
-} TestCase;
 
 void add_test(void (*fn)(void), const char* name);
 
@@ -38,11 +25,26 @@ void add_test(void (*fn)(void), const char* name);
 
 #include <fcntl.h>
 #include <signal.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+
+typedef enum {
+  PASSED,
+  FAILED,
+  TIMEOUT,
+} Result;
+
+typedef struct {
+  void (*fn)(void);
+  const char* name;
+  uint8_t name_len;
+
+  // TODO uint8_t gid;
+  pid_t pid;
+  int pipefd[2];
+} TestCase;
 
 /*
  * Redefinable macros
@@ -74,7 +76,7 @@ void add_test(void (*fn)(void), const char* name);
 
 /*
  * in main call RUN_TESTS with either no arguments or with (argc, argv) to
- * accept input from stdin to run group of tests, or individual tests
+ * accept input from cli to run group of tests, or individual tests
  */
 
 int run_tests(const int argc,
@@ -116,100 +118,26 @@ uint16_t num_tests = 0;
 
 size_t max_len = 0;
 
-static inline int string_compare(const void* item, const void* to_compare_to) {
-  return strncmp((const char*)item, (const char*)to_compare_to,
-                 MAX_TEST_NAME_LEN);
-}
-
+static inline uint16_t parse_argv(const int argc, const char** argv);
+static inline int string_compare(const void* item, const void* to_compare_to);
 static inline int32_t find_index(
     const char* elt,
-    int (*comparator_fn)(const void* item, const void* to_compare_to)) {
-  for (int32_t i = 0; i < num_tests; ++i) {
-    if (comparator_fn(elt, tests[i].name) == 0) {
-      return i;
-    }
-  }
-
-  return -1;
-}
-
-static inline void res_to_str_col_len(const Result res,
-                                      char** result_str,
-                                      char** ansi_col,
-                                      size_t* result_len) {
-  switch (res) {
-    case PASSED:
-      *result_str = "passed";
-      *ansi_col = "32m";
-      *result_len = 6;
-      return;
-
-    case FAILED:
-      *result_str = "failed";
-      *ansi_col = "31m";
-      *result_len = 6;
-      return;
-
-    case TIMEOUT:
-      *result_str = "timed out";
-      *ansi_col = "31m";
-      *result_len = 9;
-      return;
-
-    default:
-      *result_str = "ERROR";
-      *ansi_col = "31m";
-      *result_len = 5;
-      return;
-  }
-}
-
+    int (*comparator_fn)(const void* item, const void* to_compare_to));
+static inline void execute_test(TestCase* test);
+static inline void get_res_fmt(const Result res,
+                               char** result_str,
+                               char** ansi_col);
 static inline void format_result(char* formatted_result,
                                  const size_t final_space,
-                                 const TestCase* curr_test) {
-  for (size_t i = 0; i < final_space; ++i) {
-    if (i < curr_test->name_len) {
-      formatted_result[i] = curr_test->name[i];
-    } else if (i == curr_test->name_len) {
-      formatted_result[i] = ' ';
-    } else if (i == final_space - 1) {
-      formatted_result[i] = ' ';
-    } else if (i > curr_test->name_len) {
-      formatted_result[i] = '.';
-    }
-  }
-}
+                                 const TestCase* curr_test);
 
 int run_tests(const int argc, const char** argv) {
-  uint16_t tests_found = 0;
-  if (argc > 1) {
-    // TODO implement calling individual tests
-    // TODO implement calling groups of tests (make new macros, START_GROUP,
-    // END_GROUP)
+  uint16_t tests_found = parse_argv(argc, argv);
+  // TODO implement calling groups of tests (make new macros, START_GROUP,
+  // END_GROUP)
 
-    // TODO implement a sorting algo if there are enough things that are being
-    // checked
-
-    uint16_t left_idx = 0;
-    int32_t right_idx = 0;
-
-    for (int i = 1; i < argc; ++i) {
-      // call a "finding" function to return the index
-      right_idx = find_index(argv[i], string_compare);
-
-      if (right_idx == -1) {
-        printf("Test '%s' not found\n", argv[i]);
-        continue;
-      } else if (right_idx > left_idx) {
-        TestCase tmp = tests[right_idx];
-        tests[right_idx] = tests[left_idx];
-        tests[left_idx] = tmp;
-      }
-
-      left_idx++;
-      tests_found++;
-    }
-  }
+  // TODO implement a sorting algo if there are enough things that are being
+  // checked
 
   if (tests_found == 0 && argc > 1) {
     return 1;
@@ -234,6 +162,7 @@ int run_tests(const int argc, const char** argv) {
       int pipefd[2];
       if (pipe(pipefd) != 0) {
         perror("pipe");
+        return -1;
       }
 
       curr_test->pipefd[0] = pipefd[0];
@@ -245,31 +174,8 @@ int run_tests(const int argc, const char** argv) {
       perror("fork");
       return -1;
     } else if (pid == 0) {
-      // child
-
-      if (PRINT_OUTPUT) {
-        // close read end of pipe and redirect stdout to write end
-        close(curr_test->pipefd[0]);
-        dup2(curr_test->pipefd[1], STDOUT_FILENO);
-        dup2(curr_test->pipefd[1], STDERR_FILENO);
-      } else {
-        int devnull_fd = open("/dev/null", O_WRONLY);
-        dup2(devnull_fd, STDOUT_FILENO);
-        dup2(devnull_fd, STDERR_FILENO);
-        close(devnull_fd);
-      }
-
-      alarm(MAX_TIME_PER_TEST);
-
-      curr_test->fn();
-
-      if (PRINT_OUTPUT) {
-        close(curr_test->pipefd[1]);
-      }
-
-      _exit(0);
+      execute_test(curr_test);
     } else {
-      // parent
       curr_test->pid = pid;
     }
   }
@@ -286,6 +192,7 @@ int run_tests(const int argc, const char** argv) {
     int status = 0;
     if (waitpid(curr_test->pid, &status, 0) == -1) {
       perror("waitpid");
+      return -1;
     }
 
     char buf[MAX_MSG_LEN];
@@ -294,6 +201,7 @@ int run_tests(const int argc, const char** argv) {
       if ((buf_read_n = read(curr_test->pipefd[0], buf, sizeof(buf) - 1)) ==
           -1) {
         perror("read");
+        return -1;
       }
       close(curr_test->pipefd[0]);
       if (buf_read_n == -1) {
@@ -324,15 +232,15 @@ int run_tests(const int argc, const char** argv) {
 
     char* ansi_col;  // 31 = red, 32 = green, 33 = yellow
     char* result_str;
-    size_t result_len;
 
-    res_to_str_col_len(result, &result_str, &ansi_col, &result_len);
+    get_res_fmt(result, &result_str, &ansi_col);
 
     // consists of test name, and necessary number of '.' as padding for all
     // results to end on same column
     size_t final_space = final_col - MAX_RESULT_LEN;
-    char formatted_result[MAX_FINAL_COL];
+    char formatted_result[MAX_FINAL_COL + 1];
     format_result(formatted_result, final_space, curr_test);
+    formatted_result[final_space] = '\0';
 
     // name ... result
     printf("%.*s\x1b[%s%s\x1b[0m\n", (int)final_space, formatted_result,
@@ -341,8 +249,8 @@ int run_tests(const int argc, const char** argv) {
     if (PRINT_OUTPUT) {
       if (buf_read_n) {
         printf("\x1b[33m> \x1b[0m");
+        printf("\x1b[33m%s\x1b[0m", buf);
       }
-      printf("\x1b[33m%s\x1b[0m", buf);
     }
   }
 
@@ -357,18 +265,133 @@ void add_test(void (*fn)(void), const char* name) {
     return;
   }
 
-  size_t name_len = strnlen(name, MAX_TEST_NAME_LEN);
+  uint8_t name_len = strnlen(name, MAX_TEST_NAME_LEN);
   if (name_len == MAX_TEST_NAME_LEN) {
     printf("Skipped test [name exceeds maximum length]\n");
+    return;
   }
 
   TestCase* new_test = &tests[num_tests];
-  new_test->name = (char*)name;
+  new_test->name = name;
   new_test->name_len = name_len;
   new_test->fn = fn;
 
   num_tests++;
   max_len = (name_len > max_len) ? name_len : max_len;
+}
+
+static inline uint16_t parse_argv(const int argc, const char** argv) {
+  if (argc <= 1) {
+    return 0;
+  }
+
+  uint16_t tests_found = 0;
+  uint16_t left_idx = 0;
+  int32_t right_idx;
+
+  for (int i = 1; i < argc; ++i) {
+    right_idx = find_index(argv[i], string_compare);
+
+    if (right_idx == -1) {
+      printf("Test '%s' not found\n", argv[i]);
+      continue;
+    } else if (right_idx > left_idx) {
+      TestCase tmp = tests[right_idx];
+      tests[right_idx] = tests[left_idx];
+      tests[left_idx] = tmp;
+    }
+
+    left_idx++;
+    tests_found++;
+  }
+
+  return tests_found;
+}
+
+static inline int string_compare(const void* item, const void* to_compare_to) {
+  return strncmp((const char*)item, (const char*)to_compare_to,
+                 MAX_TEST_NAME_LEN);
+}
+
+static inline int32_t find_index(
+    const char* elt,
+    int (*comparator_fn)(const void* item, const void* to_compare_to)) {
+  for (int32_t i = 0; i < num_tests; ++i) {
+    if (comparator_fn(elt, tests[i].name) == 0) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+static inline void execute_test(TestCase* test) {
+  if (PRINT_OUTPUT) {
+    // close read end of pipe and redirect stdout to write end
+    close(test->pipefd[0]);
+    dup2(test->pipefd[1], STDOUT_FILENO);
+    dup2(test->pipefd[1], STDERR_FILENO);
+  } else {
+    // redirect stdout && stderr to /dev/null so nothing is printed to
+    // terminal
+    int devnull_fd = open("/dev/null", O_WRONLY);
+    dup2(devnull_fd, STDOUT_FILENO);
+    dup2(devnull_fd, STDERR_FILENO);
+    close(devnull_fd);
+  }
+
+  // TODO make this timeout w/o alarm so we what is being tested can use signals
+  alarm(MAX_TIME_PER_TEST);
+
+  test->fn();
+
+  if (PRINT_OUTPUT) {
+    close(test->pipefd[1]);
+  }
+
+  _exit(0);
+}
+
+static inline void get_res_fmt(const Result res,
+                               char** result_str,
+                               char** ansi_col) {
+  switch (res) {
+    case PASSED:
+      *result_str = "passed";
+      *ansi_col = "32m";
+      return;
+
+    case FAILED:
+      *result_str = "failed";
+      *ansi_col = "31m";
+      return;
+
+    case TIMEOUT:
+      *result_str = "timed out";
+      *ansi_col = "31m";
+      return;
+
+    default:
+      *result_str = "ERROR";
+      *ansi_col = "31m";
+      return;
+  }
+}
+
+static inline void format_result(char* formatted_result,
+                                 const size_t final_space,
+                                 const TestCase* curr_test) {
+  for (size_t i = 0; i < final_space; ++i) {
+    if (i < curr_test->name_len) {
+      formatted_result[i] = curr_test->name[i];
+    } else if (i == curr_test->name_len) {
+      formatted_result[i] = ' ';
+    } else if (i == final_space - 1) {
+      formatted_result[i] = ' ';
+    } else if (i > curr_test->name_len) {
+      formatted_result[i] = '.';
+    }
+  }
 }
 
 #endif  // DTEST_IMPL
