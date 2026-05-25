@@ -1,9 +1,6 @@
 #ifndef DTEST_H
 #define DTEST_H
 
-#include <stdint.h>
-#include <unistd.h>
-
 // TODO custom assert commands, that are more descriptive. Get a sense of what
 // the output for things are, print out what line and file they failed on
 
@@ -25,10 +22,13 @@ void add_test(void (*fn)(void), const char* name);
 
 #include <fcntl.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
 
 typedef enum {
   PASSED,
@@ -44,6 +44,7 @@ typedef struct {
   // TODO uint8_t gid;
   pid_t pid;
   int pipefd[2];
+  time_t start_time;
 } TestCase;
 
 /*
@@ -135,17 +136,11 @@ int run_tests(const int argc, const char** argv) {
   uint16_t tests_found = parse_argv(argc, argv);
   // TODO implement calling groups of tests (make new macros, START_GROUP,
   // END_GROUP)
-
-  // TODO implement a sorting algo if there are enough things that are being
-  // checked
-
-  if (tests_found == 0 && argc > 1) {
+  if (tests_found == 0 && argc > 1)
     return 1;
-  }
 
-  if (tests_found > 0) {
+  if (tests_found > 0)
     num_tests = tests_found;
-  }
 
   size_t final_col =
       max_len + PERIOD_PADDING + SPACE_PADDING + MAX_RESULT_LEN + 1;
@@ -153,7 +148,6 @@ int run_tests(const int argc, const char** argv) {
   uint16_t tests_passed = 0;
   printf("\n");
 
-  // iterate through each test, fork (isolation in case of segfault), redirect
   // output, and call the function
   for (uint16_t i = 0; i < num_tests; ++i) {
     TestCase* curr_test = &tests[i];
@@ -169,6 +163,8 @@ int run_tests(const int argc, const char** argv) {
       curr_test->pipefd[1] = pipefd[1];
     }
 
+    curr_test->start_time = time(NULL);
+
     pid_t pid = fork();
     if (pid == -1) {
       perror("fork");
@@ -177,6 +173,8 @@ int run_tests(const int argc, const char** argv) {
       execute_test(curr_test);
     } else {
       curr_test->pid = pid;
+      if (PRINT_OUTPUT)
+        close(curr_test->pipefd[1]);
     }
   }
 
@@ -185,14 +183,42 @@ int run_tests(const int argc, const char** argv) {
   for (uint16_t i = 0; i < num_tests; ++i) {
     TestCase* curr_test = &tests[i];
 
-    if (PRINT_OUTPUT) {
-      close(curr_test->pipefd[1]);
-    }
+    Result result = FAILED;
 
+    // wait for child, killing it if it exceeds MAX_TIME_PER_TEST, and set the
+    // result
     int status = 0;
-    if (waitpid(curr_test->pid, &status, 0) == -1) {
-      perror("waitpid");
-      return -1;
+    pid_t r;
+    for (;;) {
+      r = waitpid(curr_test->pid, &status, WNOHANG);
+
+      if (r == -1) {
+        perror("waitpid");
+        return -1;
+      }
+
+      if (r == curr_test->pid) {
+        if (WIFEXITED(status)) {
+          if (WEXITSTATUS(status) != 0) {
+            result = FAILED;
+          } else {
+            result = PASSED;
+            tests_passed++;
+          }
+        } else if (WIFSIGNALED(status)) {
+          result = FAILED;
+        }
+        break;
+      }
+
+      if (time(NULL) - curr_test->start_time >= MAX_TIME_PER_TEST) {
+        kill(curr_test->pid, SIGKILL);
+        waitpid(curr_test->pid, &status, 0);
+        result = TIMEOUT;
+        break;
+      }
+
+      usleep(10000);
     }
 
     char buf[MAX_MSG_LEN];
@@ -204,31 +230,15 @@ int run_tests(const int argc, const char** argv) {
         return -1;
       }
       close(curr_test->pipefd[0]);
-      if (buf_read_n == -1) {
+
+      if (buf_read_n == -1)
         continue;
-      }
+
       buf[buf_read_n] = '\0';
     }
 
-    Result result = FAILED;
-    if (WIFEXITED(status)) {
-      if (WEXITSTATUS(status) != 0) {
-        result = FAILED;
-      } else {
-        result = PASSED;
-        tests_passed++;
-      }
-    } else if (WIFSIGNALED(status)) {
-      if (WTERMSIG(status) == SIGALRM) {
-        result = TIMEOUT;
-      } else {
-        result = FAILED;
-      }
-    }
-
-    if (!PRINT_PASSED && result == PASSED) {
+    if (!PRINT_PASSED && result == PASSED)
       continue;
-    }
 
     char* ansi_col;  // 31 = red, 32 = green, 33 = yellow
     char* result_str;
@@ -281,9 +291,8 @@ void add_test(void (*fn)(void), const char* name) {
 }
 
 static inline uint16_t parse_argv(const int argc, const char** argv) {
-  if (argc <= 1) {
+  if (argc <= 1)
     return 0;
-  }
 
   uint16_t tests_found = 0;
   uint16_t left_idx = 0;
@@ -317,9 +326,8 @@ static inline int32_t find_index(
     const char* elt,
     int (*comparator_fn)(const void* item, const void* to_compare_to)) {
   for (int32_t i = 0; i < num_tests; ++i) {
-    if (comparator_fn(elt, tests[i].name) == 0) {
+    if (comparator_fn(elt, tests[i].name) == 0)
       return i;
-    }
   }
 
   return -1;
@@ -340,14 +348,10 @@ static inline void execute_test(TestCase* test) {
     close(devnull_fd);
   }
 
-  // TODO make this timeout w/o alarm so we what is being tested can use signals
-  alarm(MAX_TIME_PER_TEST);
-
   test->fn();
 
-  if (PRINT_OUTPUT) {
+  if (PRINT_OUTPUT)
     close(test->pipefd[1]);
-  }
 
   _exit(0);
 }
@@ -382,15 +386,14 @@ static inline void format_result(char* formatted_result,
                                  const size_t final_space,
                                  const TestCase* curr_test) {
   for (size_t i = 0; i < final_space; ++i) {
-    if (i < curr_test->name_len) {
+    if (i < curr_test->name_len)
       formatted_result[i] = curr_test->name[i];
-    } else if (i == curr_test->name_len) {
+    else if (i == curr_test->name_len)
       formatted_result[i] = ' ';
-    } else if (i == final_space - 1) {
+    else if (i == final_space - 1)
       formatted_result[i] = ' ';
-    } else if (i > curr_test->name_len) {
+    else if (i > curr_test->name_len)
       formatted_result[i] = '.';
-    }
   }
 }
 
