@@ -1,16 +1,18 @@
 # dtest
 
-Simple, fast, one header file, C unit test case framework.
+Simple, fast, one header file, C unit test case framework. Zero heap allocations.
 
 ---
 
 ## Usage:
-define macro ```DTEST_IMPL``` at the top of the file, then include ```dtest.h```. Create your test cases, and in main call the macro ```REGISTER_TEST(test)``` on each of your tests. Finally, call ```RUN_TESTS()```, which can optionally accept arguments ```(int argc, char** argv)```.
+define macro ```DTEST_IMPL``` at the top of the file, then include ```dtest.h```. Create your test cases, and in main call the macro ```REGISTER_TEST(test)``` on each of your tests. Finally, call ```RUN_TESTS()```, which can optionally accept arguments ```(int argc, char** argv)```. If argc and argv are provided, user can run only a select number of tests -- or group of tests -- by providing ```test_name``` or ```[group_name]``` as an argument to the program.
 
 optional setting modifications: before ```#include "dtest.h"``` and after ```#define DTEST_IMPL```, you can redefine:
 - ```MAX_TESTS```: default 128
-- ```MAX_MSG_LEN```: default 1024 bytes
+- ```MAX_GROUPS```: default 16
 - ```MAX_TEST_NAME_LEN```: default 48 bytes
+- ```MAX_GROUP_NAME_LEN```: default 48 bytes
+- ```MAX_MSG_LEN```: default 1024 bytes
 - ```MAX_TIME_PER_TEST```: default 1s
 - ```PRINT_OUTPUT```: default 1 (true)
 - ```PRINT_PASSED```: default 0 (false)
@@ -19,17 +21,48 @@ optional setting modifications: before ```#include "dtest.h"``` and after ```#de
 
 ---
 
-### Example:
+## Examples:
+
+### Tests all contained in one file:
 ```C
 #define DTEST_IMPL
 #include "dtest.h"
 
-void foo_test(void);
-void bar_test(void);
+void foo_test(void) { assert(...) }
+void bar_test(void) { assert(...) }
 
 int main(void) {
     REGISTER_TEST(foo_test);
     REGISTER_TEST(bar_test);
     RUN_TESTS();
+}
+```
+
+### Tests contained in multiple files:
+```C
+// example_tests.h
+#include "dtest.h"
+
+void test_addition_true(void) {
+    assert(1 + 1 == 2);
+}
+
+void test_runs_beyond_timeout(void) {
+    sleep(100);
+}
+```
+
+```C
+// main.c
+#include "example_tests.h"
+
+#define DTEST_IMPL
+#include "dtest.h"
+
+int main(int argc, char** argv) {
+  REGISTER_TEST(test_addition_true);
+  REGISTER_TEST(test_runs_beyond_timeout);
+
+  RUN_TESTS(argc, argv);
 }
 ```

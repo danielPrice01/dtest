@@ -10,9 +10,13 @@
  */
 
 void add_test(void (*fn)(void), const char* name);
+void start_group(const char* group);
+void end_group();
 
 // after every test, call REGISTER_TEST to add it to tests that will be executed
 #define REGISTER_TEST(test) add_test(test, #test)
+#define START_GROUP(group) start_group(#group)
+#define END_GROUP(group) end_group(#group)
 
 #ifdef DTEST_IMPL
 
@@ -40,8 +44,8 @@ typedef struct {
   void (*fn)(void);
   const char* name;
   uint8_t name_len;
+  int16_t gid;
 
-  // TODO uint8_t gid;
   pid_t pid;
   int pipefd[2];
   time_t start_time;
@@ -55,13 +59,21 @@ typedef struct {
 #define MAX_TESTS 128
 #endif  // MAX_TESTS
 
-#ifndef MAX_MSG_LEN
-#define MAX_MSG_LEN 1024
-#endif  // MAX_MSG_LEN
+#ifndef MAX_GROUPS
+#define MAX_GROUPS 16
+#endif  // MAX_GROUPS
 
 #ifndef MAX_TEST_NAME_LEN
 #define MAX_TEST_NAME_LEN 48
 #endif  // MAX_TEST_NAME_LEN
+
+#ifndef MAX_GROUP_NAME_LEN
+#define MAX_GROUP_NAME_LEN 48
+#endif  // MAX_GROUP_NAME_LEN
+
+#ifndef MAX_MSG_LEN
+#define MAX_MSG_LEN 1024
+#endif  // MAX_MSG_LEN
 
 #ifndef MAX_TIME_PER_TEST
 #define MAX_TIME_PER_TEST 1  // in s
@@ -116,6 +128,10 @@ int run_tests(const int argc,
 
 TestCase tests[MAX_TESTS];
 uint16_t num_tests = 0;
+
+char groups[MAX_GROUPS][MAX_GROUP_NAME_LEN];
+uint16_t num_groups = 0;
+int16_t curr_group = -1;
 
 size_t max_len = 0;
 
@@ -282,12 +298,34 @@ void add_test(void (*fn)(void), const char* name) {
   }
 
   TestCase* new_test = &tests[num_tests];
+  new_test->fn = fn;
   new_test->name = name;
   new_test->name_len = name_len;
-  new_test->fn = fn;
+  new_test->gid = curr_group;
 
   num_tests++;
   max_len = (name_len > max_len) ? name_len : max_len;
+}
+
+void start_group(const char* group) {
+  if (num_groups == MAX_GROUPS) {
+    printf("Skipped group [max number of groups reached]\n");
+    return;
+  }
+
+  if (strnlen(group, MAX_GROUP_NAME_LEN) == MAX_GROUP_NAME_LEN) {
+    printf("Skipped group [name exceeds maximum length]\n");
+    return;
+  }
+
+  curr_group = num_groups + 1;
+  groups[curr_group - 1] = group;
+
+  num_groups++;
+}
+
+void end_group() {
+  curr_group = -1;
 }
 
 static inline uint16_t parse_argv(const int argc, const char** argv) {
@@ -299,7 +337,14 @@ static inline uint16_t parse_argv(const int argc, const char** argv) {
   int32_t right_idx;
 
   for (int i = 1; i < argc; ++i) {
-    right_idx = find_index(argv[i], string_compare);
+    // [...] denotes a group
+    if (argv[i][0] == '[') {
+      for (;;) {
+        break;
+      }
+    } else {
+      right_idx = find_index(argv[i], string_compare);
+    }
 
     if (right_idx == -1) {
       printf("Test '%s' not found\n", argv[i]);
