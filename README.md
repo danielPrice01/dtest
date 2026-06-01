@@ -5,6 +5,8 @@ Simple, fast, one header file, C unit test case framework. Zero heap allocations
 ---
 
 ## Usage:
+Only works on Unix systems.
+
 1. Define macro ```DTEST_IMPL``` at the top of the file
 2. Add ```#include dtest.h``` right after.
 3. Create your test cases, and inside main use the macro ```REGISTER_TEST(test)``` on each of your tests.
@@ -15,7 +17,12 @@ Simple, fast, one header file, C unit test case framework. Zero heap allocations
    
 5. Finally, call ```RUN_TESTS()``` or ```RUN_TESTS(argc, argv)```. If argc and argv are provided, user can run only a select number of tests -- or group of tests -- by providing ```test_name``` or ```[group_name]``` as an argument to the program.
 
-optional setting modifications: before ```#include "dtest.h"``` and after ```#define DTEST_IMPL```, you can redefine:
+[See example file](example_tests.c)
+
+---
+
+## Optional Setting Modifications:
+Before ```#include "dtest.h"``` and after ```#define DTEST_IMPL```, you can redefine:
 - ```MAX_TESTS```: default 128
 - ```MAX_GROUPS```: default 16
 - ```MAX_TEST_NAME_LEN```: default 48 bytes
@@ -24,8 +31,6 @@ optional setting modifications: before ```#include "dtest.h"``` and after ```#de
 - ```MAX_TIME_PER_TEST```: default 1s
 - ```PRINT_OUTPUT```: default 1 (true)
 - ```PRINT_PASSED```: default 0 (false)
-
-[See example file](example_tests.c)
 
 ---
 
