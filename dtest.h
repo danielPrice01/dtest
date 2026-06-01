@@ -10,13 +10,16 @@
  */
 
 void add_test(void (*fn)(void), const char* name);
-void start_group(const char* group);
+
+void start_group(const char* name);
 void end_group(void);
+void silence_group(const char* name);
 
 // after every test, call REGISTER_TEST to add it to tests that will be executed
 #define REGISTER_TEST(test) add_test(test, #test)
 #define START_GROUP(group) start_group(#group)
 #define END_GROUP() end_group()
+#define SILENCE_GROUP(group) silence_group(#group)
 
 #ifdef DTEST_IMPL
 
@@ -44,12 +47,17 @@ typedef struct {
   void (*fn)(void);
   const char* name;
   uint8_t name_len;
-  int16_t gid;
+  int32_t gid;
 
   pid_t pid;
   int pipefd[2];
   time_t start_time;
 } TestCase;
+
+typedef struct {
+  const char* name;
+  uint8_t silenced;
+} Group;
 
 /*
  * Redefinable macros
@@ -75,9 +83,10 @@ typedef struct {
 #define MAX_MSG_LEN 1024
 #endif  // MAX_MSG_LEN
 
+/* in seconds */
 #ifndef MAX_TIME_PER_TEST
-#define MAX_TIME_PER_TEST 1  // in s
-#endif                       // MAX_TIME_PER_TEST
+#define MAX_TIME_PER_TEST 1
+#endif  // MAX_TIME_PER_TEST
 
 #ifndef PRINT_OUTPUT
 #define PRINT_OUTPUT 1
@@ -87,16 +96,20 @@ typedef struct {
 #define PRINT_PASSED 0
 #endif  // PRINT_PASSED
 
-/*
- * in main call RUN_TESTS with either no arguments or with (argc, argv) to
- * accept input from cli to run group of tests, or individual tests
- */
+#ifndef PRINT_GROUPS_SILENCED
+#define PRINT_GROUPS_SILENCED 1
+#endif  // PRINT_GROUPS_SILENCED
 
-int run_tests(const int argc,
-              const char** argv);  // returns 0 when all tests passed, 1 ow
+// returns 0 when all tests passed, or 1 otherwise
+int run_tests(const int argc, const char** argv);
 
 /*
  * Fixed macros
+ */
+
+/*
+ * in main call RUN_TESTS with either no arguments or with (argc, argv) to
+ * accept input from cli to run group of tests, or individual tests
  */
 
 // GET_RUN_TEST expands to be equal to the 6th value (index = 5)
@@ -129,17 +142,26 @@ int run_tests(const int argc,
 TestCase tests[MAX_TESTS];
 uint16_t num_tests = 0;
 
-char groups[MAX_GROUPS][MAX_GROUP_NAME_LEN];
+Group groups[MAX_GROUPS];
 uint16_t num_groups = 0;
 int16_t curr_group = -1;
 
 size_t max_len = 0;
 
 static inline uint16_t parse_argv(const int argc, const char** argv);
-static inline int string_compare(const void* item, const void* to_compare_to);
-static inline int32_t find_index(
-    const char* elt,
-    int (*comparator_fn)(const void* item, const void* to_compare_to));
+static inline int string_compare(const void* item,
+                                 const void* to_compare_to,
+                                 size_t max_length);
+static inline int32_t find_gid(const char* group_name, size_t group_name_len);
+static inline int32_t find_index(const char* elt,
+                                 int (*comparator_fn)(const void* item,
+                                                      const void* to_compare_to,
+                                                      size_t max_length),
+                                 size_t max_length);
+static inline int8_t swap_tests(uint16_t* left_idx,
+                                int32_t* right_idx,
+                                uint16_t* tests_found);
+
 static inline void execute_test(TestCase* test);
 static inline void get_res_fmt(const Result res,
                                char** result_str,
@@ -149,6 +171,7 @@ static inline void format_result(char* formatted_result,
                                  const TestCase* curr_test);
 
 int run_tests(const int argc, const char** argv) {
+  // TODO reduce num_tests if any tests were silenced
   uint16_t tests_found = parse_argv(argc, argv);
   if (tests_found == 0 && argc > 1)
     return 1;
@@ -165,6 +188,8 @@ int run_tests(const int argc, const char** argv) {
   // output, and call the function
   for (uint16_t i = 0; i < num_tests; ++i) {
     TestCase* curr_test = &tests[i];
+    if (curr_test->gid != -1 && groups[curr_test->gid].silenced)
+      continue;
 
     if (PRINT_OUTPUT) {
       int pipefd[2];
@@ -196,6 +221,8 @@ int run_tests(const int argc, const char** argv) {
   // output
   for (uint16_t i = 0; i < num_tests; ++i) {
     TestCase* curr_test = &tests[i];
+    if (curr_test->gid != -1 && groups[curr_test->gid].silenced)
+      continue;
 
     Result result = FAILED;
 
@@ -235,22 +262,6 @@ int run_tests(const int argc, const char** argv) {
       usleep(10000);
     }
 
-    char buf[MAX_MSG_LEN];
-    ssize_t buf_read_n;
-    if (PRINT_OUTPUT) {
-      if ((buf_read_n = read(curr_test->pipefd[0], buf, sizeof(buf) - 1)) ==
-          -1) {
-        perror("read");
-        return -1;
-      }
-      close(curr_test->pipefd[0]);
-
-      if (buf_read_n == -1)
-        continue;
-
-      buf[buf_read_n] = '\0';
-    }
-
     if (!PRINT_PASSED && result == PASSED)
       continue;
 
@@ -270,6 +281,22 @@ int run_tests(const int argc, const char** argv) {
     printf("%.*s\x1b[%s%s\x1b[0m\n", (int)final_space, formatted_result,
            ansi_col, result_str);
 
+    char buf[MAX_MSG_LEN];
+    ssize_t buf_read_n;
+    if (PRINT_OUTPUT) {
+      if ((buf_read_n = read(curr_test->pipefd[0], buf, sizeof(buf) - 1)) ==
+          -1) {
+        perror("read");
+        return -1;
+      }
+      close(curr_test->pipefd[0]);
+
+      if (buf_read_n == -1)
+        continue;
+
+      buf[buf_read_n] = '\0';
+    }
+
     if (PRINT_OUTPUT) {
       if (buf_read_n) {
         printf("\x1b[33m> \x1b[0m");
@@ -285,13 +312,13 @@ int run_tests(const int argc, const char** argv) {
 
 void add_test(void (*fn)(void), const char* name) {
   if (num_tests == MAX_TESTS) {
-    printf("Skipped test [max number of tests reached]\n");
+    printf("Skipped test %s [name exceeds maximum length]\n", name);
     return;
   }
 
   uint8_t name_len = strnlen(name, MAX_TEST_NAME_LEN);
   if (name_len == MAX_TEST_NAME_LEN) {
-    printf("Skipped test [name exceeds maximum length]\n");
+    printf("Skipped test %s [name exceeds maximum length]\n", name);
     return;
   }
 
@@ -305,25 +332,39 @@ void add_test(void (*fn)(void), const char* name) {
   max_len = (name_len > max_len) ? name_len : max_len;
 }
 
-void start_group(const char* group) {
+void start_group(const char* name) {
   if (num_groups == MAX_GROUPS) {
-    printf("Skipped group [max number of groups reached]\n");
+    printf("Skipped group %s [max number of groups reached]\n", name);
     return;
   }
 
-  if (strnlen(group, MAX_GROUP_NAME_LEN) == MAX_GROUP_NAME_LEN) {
-    printf("Skipped group [name exceeds maximum length]\n");
+  if (strnlen(name, MAX_GROUP_NAME_LEN) == MAX_GROUP_NAME_LEN) {
+    printf("Skipped group %s [max number of groups reached]\n", name);
     return;
   }
 
-  curr_group = num_groups + 1;
-  memcpy(groups[curr_group - 1], group, MAX_GROUP_NAME_LEN);
+  curr_group = num_groups;
+
+  Group* new_group = &groups[curr_group];
+  new_group->name = name;
+  new_group->silenced = 0;
 
   num_groups++;
 }
 
 void end_group(void) {
   curr_group = -1;
+}
+
+void silence_group(const char* name) {
+  for (uint16_t i = 0; i < num_groups; ++i) {
+    if (string_compare(name, groups[i].name, MAX_GROUP_NAME_LEN) == 0) {
+      (&groups[i])->silenced = 1;
+
+      if (PRINT_GROUPS_SILENCED)
+        printf("Group [%s] silenced\n", name);
+    }
+  }
 }
 
 static inline uint16_t parse_argv(const int argc, const char** argv) {
@@ -336,48 +377,81 @@ static inline uint16_t parse_argv(const int argc, const char** argv) {
 
   for (int i = 1; i < argc; ++i) {
     // [...] denotes a group
-    if (argv[i][0] == '[') {
+    size_t arg_len = strnlen(argv[i], MAX_GROUP_NAME_LEN);
+    if (argv[i][0] == '[' && argv[i][arg_len - 1] == ']') {
+      int32_t gid = find_gid(argv[i], arg_len);
+      if (gid == -1) {
+        printf("Group %s not found\n", argv[i]);
+        continue;
+      }
+
+      (&groups[gid])->silenced = 0;
+
       // TODO
-      // find the gid for corresponding argvi[i]
       // modify find_index to accept a starting index, rather than 0? and set it
       // to left_idx while(find_index(gid, gid_compare != -1);
-      for (;;) {
-        break;
-      }
+
+      // while ((right_idx = find_index) != -1) {
+      //   swap_tests(&left_idx, &right_idx, &tests_found);
+      // }
     } else {
-      right_idx = find_index(argv[i], string_compare);
+      right_idx = find_index(argv[i], string_compare, MAX_TEST_NAME_LEN);
+      // TODO get the gid associated with this test and unsilence it
+      if (swap_tests(&left_idx, &right_idx, &tests_found) == -1)
+        printf("Test '%s' not found\n", argv[i]);
     }
-
-    if (right_idx == -1) {
-      printf("Test '%s' not found\n", argv[i]);
-      continue;
-    } else if (right_idx > left_idx) {
-      TestCase tmp = tests[right_idx];
-      tests[right_idx] = tests[left_idx];
-      tests[left_idx] = tmp;
-    }
-
-    left_idx++;
-    tests_found++;
   }
 
   return tests_found;
 }
 
-static inline int string_compare(const void* item, const void* to_compare_to) {
-  return strncmp((const char*)item, (const char*)to_compare_to,
-                 MAX_TEST_NAME_LEN);
+static inline int string_compare(const void* item,
+                                 const void* to_compare_to,
+                                 size_t max_length) {
+  return strncmp((const char*)item, (const char*)to_compare_to, max_length);
 }
 
-static inline int32_t find_index(
-    const char* elt,
-    int (*comparator_fn)(const void* item, const void* to_compare_to)) {
-  for (uint16_t i = 0; i < num_tests; ++i) {
-    if (comparator_fn(elt, tests[i].name) == 0)
+static inline int32_t find_gid(const char* group_name, size_t group_name_len) {
+  if (group_name_len <= 2)
+    return -1;
+
+  for (uint16_t i = 0; i < num_groups; ++i) {
+    if (string_compare(group_name + 1, groups[i].name, group_name_len - 2) ==
+            0 &&
+        groups[i].name[group_name_len - 2] == '\0')
       return i;
   }
 
   return -1;
+}
+
+static inline int32_t find_index(const char* elt,
+                                 int (*comparator_fn)(const void* item,
+                                                      const void* to_compare_to,
+                                                      size_t max_length),
+                                 size_t max_length) {
+  for (uint16_t i = 0; i < num_tests; ++i) {
+    if (comparator_fn(elt, tests[i].name, max_length) == 0)
+      return i;
+  }
+
+  return -1;
+}
+
+static inline int8_t swap_tests(uint16_t* left_idx,
+                                int32_t* right_idx,
+                                uint16_t* tests_found) {
+  if (*right_idx == -1) {
+    return -1;
+  } else if (*right_idx > *left_idx) {
+    TestCase tmp = tests[*right_idx];
+    tests[*right_idx] = tests[*left_idx];
+    tests[*left_idx] = tmp;
+  }
+
+  (*left_idx)++;
+  (*tests_found)++;
+  return 0;
 }
 
 static inline void execute_test(TestCase* test) {
@@ -433,14 +507,15 @@ static inline void format_result(char* formatted_result,
                                  const size_t final_space,
                                  const TestCase* curr_test) {
   for (size_t i = 0; i < final_space; ++i) {
-    if (i < curr_test->name_len)
+    if (i < curr_test->name_len) {
       formatted_result[i] = curr_test->name[i];
-    else if (i == curr_test->name_len)
+    } else if (i == curr_test->name_len) {
       formatted_result[i] = ' ';
-    else if (i == final_space - 1)
+    } else if (i == final_space - 1) {
       formatted_result[i] = ' ';
-    else if (i > curr_test->name_len)
+    } else if (i > curr_test->name_len) {
       formatted_result[i] = '.';
+    }
   }
 }
 

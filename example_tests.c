@@ -39,6 +39,8 @@ int main(int argc, char** argv) {
   REGISTER_TEST(test_runs_within_timeout);
   REGISTER_TEST(test_runs_beyond_timeout);
 
+  SILENCE_GROUP(addition);
+
   // RUN_TESTS(); // THIS WORKS AS WELL
   RUN_TESTS(argc, argv);
 }
