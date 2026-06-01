@@ -27,10 +27,15 @@ void test_runs_beyond_timeout(void) {
 }
 
 int main(int argc, char** argv) {
+  START_GROUP(addition);
   REGISTER_TEST(test_addition_true);
   REGISTER_TEST(test_addition_false);
+
+  START_GROUP(multiplication);
   REGISTER_TEST(test_multiplication_true);
   REGISTER_TEST(test_multiplication_false);
+
+  START_GROUP(sleep);
   REGISTER_TEST(test_runs_within_timeout);
   REGISTER_TEST(test_runs_beyond_timeout);
 

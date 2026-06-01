@@ -11,12 +11,12 @@
 
 void add_test(void (*fn)(void), const char* name);
 void start_group(const char* group);
-void end_group();
+void end_group(void);
 
 // after every test, call REGISTER_TEST to add it to tests that will be executed
 #define REGISTER_TEST(test) add_test(test, #test)
 #define START_GROUP(group) start_group(#group)
-#define END_GROUP(group) end_group(#group)
+#define END_GROUP() end_group()
 
 #ifdef DTEST_IMPL
 
@@ -150,8 +150,6 @@ static inline void format_result(char* formatted_result,
 
 int run_tests(const int argc, const char** argv) {
   uint16_t tests_found = parse_argv(argc, argv);
-  // TODO implement calling groups of tests (make new macros, START_GROUP,
-  // END_GROUP)
   if (tests_found == 0 && argc > 1)
     return 1;
 
@@ -319,12 +317,12 @@ void start_group(const char* group) {
   }
 
   curr_group = num_groups + 1;
-  groups[curr_group - 1] = group;
+  memcpy(groups[curr_group - 1], group, MAX_GROUP_NAME_LEN);
 
   num_groups++;
 }
 
-void end_group() {
+void end_group(void) {
   curr_group = -1;
 }
 
@@ -339,6 +337,10 @@ static inline uint16_t parse_argv(const int argc, const char** argv) {
   for (int i = 1; i < argc; ++i) {
     // [...] denotes a group
     if (argv[i][0] == '[') {
+      // TODO
+      // find the gid for corresponding argvi[i]
+      // modify find_index to accept a starting index, rather than 0? and set it
+      // to left_idx while(find_index(gid, gid_compare != -1);
       for (;;) {
         break;
       }
@@ -370,7 +372,7 @@ static inline int string_compare(const void* item, const void* to_compare_to) {
 static inline int32_t find_index(
     const char* elt,
     int (*comparator_fn)(const void* item, const void* to_compare_to)) {
-  for (int32_t i = 0; i < num_tests; ++i) {
+  for (uint16_t i = 0; i < num_tests; ++i) {
     if (comparator_fn(elt, tests[i].name) == 0)
       return i;
   }
