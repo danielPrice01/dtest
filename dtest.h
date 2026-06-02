@@ -26,8 +26,6 @@ void silence_group(const char* name);
  * Custom assert commands to provide more descriptive error messages on failure
  */
 
-// TODO don't stringize a and b it makes it harder to debug
-
 #define DTEST_FAIL(fmt, ...)                                            \
   do {                                                                  \
     printf("%s:%d:%s: failed assertion: " fmt "\n", __FILE__, __LINE__, \
