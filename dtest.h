@@ -63,6 +63,9 @@ void silence_group(const char* name);
 #define ASSERT_STR_EQ(a, b) ASSERT_STR_CMP(a, ==, b)
 #define ASSERT_STR_NEQ(a, b) ASSERT_STR_CMP(a, !=, b)
 
+#define ASSERT_NULL(ptr) ASSERT_BINARY(ptr, ==, NULL)
+#define ASSERT_NOT_NULL(ptr) ASSERT_BINARY(ptr, !=, NULL)
+
 #ifdef DTEST_IMPL
 
 /*
@@ -218,6 +221,7 @@ static inline int8_t swap_tests(uint16_t* left_idx,
                                 int32_t* right_idx,
                                 uint16_t* tests_found);
 
+static inline void drain_pipe(int fd, char* buf, size_t* buf_len);
 static inline void execute_test(TestCase* test);
 static inline void get_res_fmt(const Result res,
                                char** result_str,
@@ -263,6 +267,7 @@ int run_tests(const int argc, const char** argv) {
 
       curr_test->pipefd[0] = pipefd[0];
       curr_test->pipefd[1] = pipefd[1];
+      fcntl(curr_test->pipefd[0], F_SETFL, O_NONBLOCK);
     }
 
     curr_test->start_time = time(NULL);
@@ -289,12 +294,16 @@ int run_tests(const int argc, const char** argv) {
 
     Result result = FAILED;
 
+    char buf[MAX_MSG_LEN];
+    size_t buf_len = 0;
+
     // wait for child, killing it if it exceeds MAX_TIME_PER_TEST, and set the
     // result
     int status = 0;
     pid_t r;
     for (;;) {
-      // TODO drain the pipe
+      if (PRINT_OUTPUT)
+        drain_pipe(curr_test->pipefd[0], buf, &buf_len);
 
       r = waitpid(curr_test->pid, &status, WNOHANG);
 
@@ -320,6 +329,10 @@ int run_tests(const int argc, const char** argv) {
       if (time(NULL) - curr_test->start_time >= MAX_TIME_PER_TEST) {
         kill(curr_test->pid, SIGKILL);
         waitpid(curr_test->pid, &status, 0);
+
+        if (PRINT_OUTPUT)
+          drain_pipe(curr_test->pipefd[0], buf, &buf_len);
+
         result = TIMEOUT;
         break;
       }
@@ -327,23 +340,15 @@ int run_tests(const int argc, const char** argv) {
       usleep(10000);
     }
 
-    if (!PRINT_PASSED && result == PASSED)
+    if (!PRINT_PASSED && result == PASSED) {
+      if (PRINT_OUTPUT)
+        close(curr_test->pipefd[0]);
       continue;
+    }
 
-    char buf[MAX_MSG_LEN];
-    ssize_t buf_read_n;
     if (PRINT_OUTPUT) {
-      if ((buf_read_n = read(curr_test->pipefd[0], buf, sizeof(buf) - 1)) ==
-          -1) {
-        perror("read");
-        return -1;
-      }
       close(curr_test->pipefd[0]);
-
-      if (buf_read_n == -1)
-        continue;
-
-      buf[buf_read_n] = '\0';
+      buf[buf_len] = '\0';
     }
 
     char* ansi_col;  // 31 = red, 32 = green, 33 = yellow
@@ -362,11 +367,9 @@ int run_tests(const int argc, const char** argv) {
     printf("%.*s\x1b[%s%s\x1b[0m\n", (int)final_space, formatted_result,
            ansi_col, result_str);
 
-    if (PRINT_OUTPUT) {
-      if (buf_read_n) {
-        printf("\x1b[33m> \x1b[0m");
-        printf("\x1b[33m%s\x1b[0m", buf);
-      }
+    if (PRINT_OUTPUT && buf_len) {
+      printf("\x1b[33m> \x1b[0m");
+      printf("\x1b[33m%s\x1b[0m", buf);
     }
   }
 
@@ -378,7 +381,7 @@ int run_tests(const int argc, const char** argv) {
 
 void add_test(void (*fn)(void), const char* name) {
   if (num_tests == MAX_TESTS) {
-    printf("Skipped test %s [name exceeds maximum length]\n", name);
+    printf("Skipped test %s [maximum number of tests exceeded]\n", name);
     return;
   }
 
@@ -400,12 +403,12 @@ void add_test(void (*fn)(void), const char* name) {
 
 void start_group(const char* name) {
   if (num_groups == MAX_GROUPS) {
-    printf("Skipped group %s [max number of groups reached]\n", name);
+    printf("Skipped group %s [maximum number of groups exceeded]\n", name);
     return;
   }
 
   if (strnlen(name, MAX_GROUP_NAME_LEN) == MAX_GROUP_NAME_LEN) {
-    printf("Skipped group %s [max number of groups reached]\n", name);
+    printf("Skipped group %s [name exceeds maximum length]\n", name);
     return;
   }
 
@@ -425,7 +428,7 @@ void end_group(void) {
 void silence_group(const char* name) {
   for (uint16_t i = 0; i < num_groups; ++i) {
     if (string_compare(name, groups[i].name, MAX_GROUP_NAME_LEN) == 0) {
-      (&groups[i])->silenced = 1;
+      groups[i].silenced = 1;
 
       if (PRINT_GROUPS_SILENCED)
         printf("Group [%s] silenced\n", name);
@@ -490,6 +493,7 @@ static inline int32_t find_gid(const char* group_name, size_t group_name_len) {
     return -1;
 
   for (uint16_t i = 0; i < num_groups; ++i) {
+    // reject groups that are a prefix of requested group
     if (string_compare(group_name + 1, groups[i].name, group_name_len - 2) ==
             0 &&
         groups[i].name[group_name_len - 2] == '\0')
@@ -530,6 +534,20 @@ static inline int8_t swap_tests(uint16_t* left_idx,
   (*left_idx)++;
   (*tests_found)++;
   return 0;
+}
+
+static inline void drain_pipe(int fd, char* buf, size_t* buf_len) {
+  char tmp[4096];
+  ssize_t n;
+
+  while ((n = read(fd, tmp, sizeof(tmp))) > 0) {
+    size_t space = (MAX_MSG_LEN - 1) - *buf_len;
+    if (space > 0) {
+      size_t to_copy = ((size_t)n < space) ? (size_t)n : space;
+      memcpy(buf + *buf_len, tmp, to_copy);
+      *buf_len += to_copy;
+    }
+  }
 }
 
 static inline void execute_test(TestCase* test) {
