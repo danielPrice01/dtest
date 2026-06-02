@@ -26,6 +26,8 @@ void silence_group(const char* name);
  * Custom assert commands to provide more descriptive error messages on failure
  */
 
+// TODO don't stringize a and b it makes it harder to debug
+
 #define DTEST_FAIL(fmt, ...)                                            \
   do {                                                                  \
     printf("%s:%d:%s: failed assertion: " fmt "\n", __FILE__, __LINE__, \
@@ -41,16 +43,16 @@ void silence_group(const char* name);
       DTEST_FAIL("%s", #condition); \
   } while (0)
 
-#define ASSERT_BINARY(a, op, b)            \
-  do {                                     \
-    if (!((a)op(b)))                       \
-      DTEST_FAIL("%s %s %s", #a, #op, #b); \
+#define ASSERT_BINARY(a, op, b)          \
+  do {                                   \
+    if (!((a)op(b)))                     \
+      DTEST_FAIL("%d %s %d", a, #op, b); \
   } while (0)
 
-#define ASSERT_STR_CMP(a, op, b)                      \
-  do {                                                \
-    if (!(strcmp((a), (b)) op 0))                     \
-      DTEST_FAIL("strcmp(%s, %s) %s 0", #a, #b, #op); \
+#define ASSERT_STR_CMP(a, op, b)         \
+  do {                                   \
+    if (!(strcmp((a), (b)) op 0))        \
+      DTEST_FAIL("%s %s %s", a, #op, b); \
   } while (0)
 
 /* Derived asserts */
