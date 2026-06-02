@@ -1,9 +1,6 @@
 #ifndef DTEST_H
 #define DTEST_H
 
-// TODO custom assert commands, that are more descriptive. Get a sense of what
-// the output for things are, print out what line and file they failed on
-
 /*
  * Visible when calling #include "dtest.h" but without #define DTEST_IMPL_
  * before
@@ -20,6 +17,51 @@ void silence_group(const char* name);
 #define START_GROUP(group) start_group(#group)
 #define END_GROUP() end_group()
 #define SILENCE_GROUP(group) silence_group(#group)
+
+/*
+ * Custom assert commands to provide more descriptive error messages on failure
+ */
+
+#define DTEST_FAIL(fmt, ...)                                            \
+  do {                                                                  \
+    printf("%s:%d:%s: failed assertion: " fmt "\n", __FILE__, __LINE__, \
+           __func__, ##__VA_ARGS__);                                    \
+    exit(1);                                                            \
+  } while (0)
+
+/* Base asserts */
+
+#define ASSERT_TRUE(condition)      \
+  do {                              \
+    if (!(condition))               \
+      DTEST_FAIL("%s", #condition); \
+  } while (0)
+
+#define ASSERT_BINARY(a, op, b)            \
+  do {                                     \
+    if (!((a)op(b)))                       \
+      DTEST_FAIL("%s %s %s", #a, #op, #b); \
+  } while (0)
+
+#define ASSERT_STR_CMP(a, op, b)                      \
+  do {                                                \
+    if (!(strcmp((a), (b)) op 0))                     \
+      DTEST_FAIL("strcmp(%s, %s) %s 0", #a, #b, #op); \
+  } while (0)
+
+/* Derived asserts */
+
+#define ASSERT_FALSE(condition) ASSERT_TRUE(!(condition))
+
+#define ASSERT_EQ(a, b) ASSERT_BINARY(a, ==, b)
+#define ASSERT_NEQ(a, b) ASSERT_BINARY(a, !=, b)
+#define ASSERT_LT(a, b) ASSERT_BINARY(a, <, b)
+#define ASSERT_LTE(a, b) ASSERT_BINARY(a, <=, b)
+#define ASSERT_GT(a, b) ASSERT_BINARY(a, >, b)
+#define ASSERT_GTE(a, b) ASSERT_BINARY(a, >=, b)
+
+#define ASSERT_STR_EQ(a, b) ASSERT_STR_CMP(a, ==, b)
+#define ASSERT_STR_NEQ(a, b) ASSERT_STR_CMP(a, !=, b)
 
 #ifdef DTEST_IMPL
 
@@ -146,18 +188,24 @@ Group groups[MAX_GROUPS];
 uint16_t num_groups = 0;
 int16_t curr_group = -1;
 
+uint16_t silenced_tests = 0;
+
 size_t max_len = 0;
 
 static inline uint16_t parse_argv(const int argc, const char** argv);
-static inline int string_compare(const void* item,
-                                 const void* to_compare_to,
-                                 size_t max_length);
+static inline int32_t string_compare(const void* item,
+                                     const void* to_compare_to,
+                                     size_t max_length);
+static inline int32_t gid_compare(const void* gid,
+                                  const void* test,
+                                  size_t null);
 static inline int32_t find_gid(const char* group_name, size_t group_name_len);
-static inline int32_t find_index(const char* elt,
+static inline int32_t find_index(uint16_t starting_index,
+                                 uint8_t is_group,
+                                 const void* elt,
                                  int (*comparator_fn)(const void* item,
                                                       const void* to_compare_to,
-                                                      size_t max_length),
-                                 size_t max_length);
+                                                      size_t max_length));
 static inline int8_t swap_tests(uint16_t* left_idx,
                                 int32_t* right_idx,
                                 uint16_t* tests_found);
@@ -171,13 +219,15 @@ static inline void format_result(char* formatted_result,
                                  const TestCase* curr_test);
 
 int run_tests(const int argc, const char** argv) {
-  // TODO reduce num_tests if any tests were silenced
   uint16_t tests_found = parse_argv(argc, argv);
   if (tests_found == 0 && argc > 1)
     return 1;
 
   if (tests_found > 0)
     num_tests = tests_found;
+
+  if (num_tests == 0)
+    return 0;
 
   size_t final_col =
       max_len + PERIOD_PADDING + SPACE_PADDING + MAX_RESULT_LEN + 1;
@@ -188,8 +238,11 @@ int run_tests(const int argc, const char** argv) {
   // output, and call the function
   for (uint16_t i = 0; i < num_tests; ++i) {
     TestCase* curr_test = &tests[i];
-    if (curr_test->gid != -1 && groups[curr_test->gid].silenced)
+
+    if (curr_test->gid != -1 && groups[curr_test->gid].silenced) {
+      silenced_tests++;
       continue;
+    }
 
     if (PRINT_OUTPUT) {
       int pipefd[2];
@@ -305,7 +358,8 @@ int run_tests(const int argc, const char** argv) {
     }
   }
 
-  printf("\nTests passed: [%u/%u]\n\n", tests_passed, num_tests);
+  printf("\nTests passed: [%u/%u]\n\n", tests_passed,
+         num_tests - silenced_tests);
 
   return (tests_passed == num_tests) ? 0 : 1;
 }
@@ -387,27 +441,35 @@ static inline uint16_t parse_argv(const int argc, const char** argv) {
 
       (&groups[gid])->silenced = 0;
 
-      // TODO
-      // modify find_index to accept a starting index, rather than 0? and set it
-      // to left_idx while(find_index(gid, gid_compare != -1);
-
-      // while ((right_idx = find_index) != -1) {
-      //   swap_tests(&left_idx, &right_idx, &tests_found);
-      // }
+      // TODO see why this is broken D::::
+      while ((right_idx = find_index(left_idx, 1, &gid, gid_compare)) != -1) {
+        swap_tests(&left_idx, &right_idx, &tests_found);
+      }
     } else {
-      right_idx = find_index(argv[i], string_compare, MAX_TEST_NAME_LEN);
-      // TODO get the gid associated with this test and unsilence it
+      right_idx = find_index(0, 0, argv[i], string_compare);
       if (swap_tests(&left_idx, &right_idx, &tests_found) == -1)
         printf("Test '%s' not found\n", argv[i]);
+
+      // unsilence group the test is part of
+      int32_t gid = tests[left_idx - 1].gid;
+      if (gid != -1 && groups[gid].silenced)
+        (&groups[gid])->silenced = 0;
     }
   }
 
   return tests_found;
 }
 
-static inline int string_compare(const void* item,
-                                 const void* to_compare_to,
-                                 size_t max_length) {
+static inline int32_t gid_compare(const void* gid,
+                                  const void* test,
+                                  size_t null) {
+  (void)null;
+  return *(int32_t*)gid == ((TestCase*)test)->gid;
+}
+
+static inline int32_t string_compare(const void* item,
+                                     const void* to_compare_to,
+                                     size_t max_length) {
   return strncmp((const char*)item, (const char*)to_compare_to, max_length);
 }
 
@@ -425,14 +487,19 @@ static inline int32_t find_gid(const char* group_name, size_t group_name_len) {
   return -1;
 }
 
-static inline int32_t find_index(const char* elt,
+static inline int32_t find_index(uint16_t starting_index,
+                                 uint8_t is_group,
+                                 const void* elt,
                                  int (*comparator_fn)(const void* item,
                                                       const void* to_compare_to,
-                                                      size_t max_length),
-                                 size_t max_length) {
-  for (uint16_t i = 0; i < num_tests; ++i) {
-    if (comparator_fn(elt, tests[i].name, max_length) == 0)
-      return i;
+                                                      size_t max_length)) {
+  for (uint16_t i = starting_index; i < num_tests; ++i) {
+    if (!is_group) {
+      if (comparator_fn(elt, (char*)tests[i].name, MAX_TEST_NAME_LEN) == 0)
+        return i;
+    } else {
+      // gid comparator
+    }
   }
 
   return -1;
