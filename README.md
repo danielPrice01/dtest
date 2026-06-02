@@ -57,8 +57,8 @@ Before ```#include "dtest.h"``` and after ```#define DTEST_IMPL```, you can rede
 #define DTEST_IMPL
 #include "dtest.h"
 
-void foo_test(void) { assert(...) }
-void bar_test(void) { assert(...) }
+void foo_test(void) { ASSERT(...) }
+void bar_test(void) { ASSERT(...) }
 
 int main(void) {
     REGISTER_TEST(foo_test);
@@ -73,7 +73,7 @@ int main(void) {
 #include "dtest.h"
 
 void test_addition_true(void) {
-    assert(1 + 1 == 2);
+    ASSERT_EQ(1 + 1, 2);
 }
 
 void test_runs_beyond_timeout(void) {
