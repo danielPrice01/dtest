@@ -36,7 +36,7 @@ Only works on Unix systems.
 - ```ASSERT_STR_NEQ(a, b)```
 ### Pointers
 -```ASSERT_NULL(ptr)```
--```ASSERT_NOT_NULL(ptr)``
+-```ASSERT_NOT_NULL(ptr)```
 
 ---
 
