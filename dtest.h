@@ -117,9 +117,17 @@ typedef struct {
 #define MAX_TEST_NAME_LEN 48
 #endif  // MAX_TEST_NAME_LEN
 
+#if MAX_TEST_NAME_LEN > 255
+#error "MAX_TEST_NAME_LEN should not exceed 255 (uint8_t)"
+#endif
+
 #ifndef MAX_GROUP_NAME_LEN
 #define MAX_GROUP_NAME_LEN 48
 #endif  // MAX_GROUP_NAME_LEN
+
+#if MAX_GROUP_NAME_LEN > 255
+#error "MAX_GROUP_NAME_LEN should not exceed 255 (uint8_t)"
+#endif
 
 #ifndef MAX_MSG_LEN
 #define MAX_MSG_LEN 1024
@@ -219,6 +227,8 @@ static inline void format_result(char* formatted_result,
                                  const TestCase* curr_test);
 
 int run_tests(const int argc, const char** argv) {
+  silenced_tests = 0;
+
   uint16_t tests_found = parse_argv(argc, argv);
   if (tests_found == 0 && argc > 1)
     return 1;
@@ -284,6 +294,8 @@ int run_tests(const int argc, const char** argv) {
     int status = 0;
     pid_t r;
     for (;;) {
+      // TODO drain the pipe
+
       r = waitpid(curr_test->pid, &status, WNOHANG);
 
       if (r == -1) {
@@ -318,22 +330,6 @@ int run_tests(const int argc, const char** argv) {
     if (!PRINT_PASSED && result == PASSED)
       continue;
 
-    char* ansi_col;  // 31 = red, 32 = green, 33 = yellow
-    char* result_str;
-
-    get_res_fmt(result, &result_str, &ansi_col);
-
-    // consists of test name, and necessary number of '.' as padding for all
-    // results to end on same column
-    size_t final_space = final_col - MAX_RESULT_LEN;
-    char formatted_result[MAX_FINAL_COL + 1];
-    format_result(formatted_result, final_space, curr_test);
-    formatted_result[final_space] = '\0';
-
-    // name ... result
-    printf("%.*s\x1b[%s%s\x1b[0m\n", (int)final_space, formatted_result,
-           ansi_col, result_str);
-
     char buf[MAX_MSG_LEN];
     ssize_t buf_read_n;
     if (PRINT_OUTPUT) {
@@ -350,6 +346,22 @@ int run_tests(const int argc, const char** argv) {
       buf[buf_read_n] = '\0';
     }
 
+    char* ansi_col;  // 31 = red, 32 = green, 33 = yellow
+    char* result_str;
+
+    get_res_fmt(result, &result_str, &ansi_col);
+
+    // consists of test name, and necessary number of '.' as padding for all
+    // results to end on same column
+    size_t final_space = final_col - MAX_RESULT_LEN;
+    char formatted_result[MAX_FINAL_COL + 1];
+    format_result(formatted_result, final_space, curr_test);
+    formatted_result[final_space] = '\0';
+
+    // name ... result
+    printf("%.*s\x1b[%s%s\x1b[0m\n", (int)final_space, formatted_result,
+           ansi_col, result_str);
+
     if (PRINT_OUTPUT) {
       if (buf_read_n) {
         printf("\x1b[33m> \x1b[0m");
@@ -361,7 +373,7 @@ int run_tests(const int argc, const char** argv) {
   printf("\nTests passed: [%u/%u]\n\n", tests_passed,
          num_tests - silenced_tests);
 
-  return (tests_passed == num_tests) ? 0 : 1;
+  return (tests_passed == (num_tests - silenced_tests)) ? 0 : 1;
 }
 
 void add_test(void (*fn)(void), const char* name) {
@@ -441,7 +453,6 @@ static inline uint16_t parse_argv(const int argc, const char** argv) {
 
       (&groups[gid])->silenced = 0;
 
-      // TODO see why this is broken D::::
       while ((right_idx = find_index(left_idx, 1, &gid, gid_compare)) != -1) {
         swap_tests(&left_idx, &right_idx, &tests_found);
       }
@@ -460,11 +471,12 @@ static inline uint16_t parse_argv(const int argc, const char** argv) {
   return tests_found;
 }
 
+// returns 0 when true, to match string_compare
 static inline int32_t gid_compare(const void* gid,
                                   const void* test,
                                   size_t null) {
   (void)null;
-  return *(int32_t*)gid == ((TestCase*)test)->gid;
+  return *(int32_t*)gid != ((TestCase*)test)->gid;
 }
 
 static inline int32_t string_compare(const void* item,
@@ -494,12 +506,11 @@ static inline int32_t find_index(uint16_t starting_index,
                                                       const void* to_compare_to,
                                                       size_t max_length)) {
   for (uint16_t i = starting_index; i < num_tests; ++i) {
-    if (!is_group) {
-      if (comparator_fn(elt, (char*)tests[i].name, MAX_TEST_NAME_LEN) == 0)
-        return i;
-    } else {
-      // gid comparator
-    }
+    const void* arg =
+        is_group ? (const void*)&tests[i] : (const void*)tests[i].name;
+
+    if (comparator_fn(elt, arg, MAX_TEST_NAME_LEN) == 0)
+      return i;
   }
 
   return -1;
