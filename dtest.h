@@ -1,8 +1,12 @@
 #ifndef DTEST_H
 #define DTEST_H
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 /*
- * Visible when calling #include "dtest.h" but without #define DTEST_IMPL_
+ * Visible when calling #include "dtest.h" but without #define DTEST_IMPL
  * before
  */
 
@@ -75,9 +79,6 @@ void silence_group(const char* name);
 #include <fcntl.h>
 #include <signal.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -402,6 +403,8 @@ void add_test(void (*fn)(void), const char* name) {
 }
 
 void start_group(const char* name) {
+  curr_group = -1;
+
   if (num_groups == MAX_GROUPS) {
     printf("Skipped group %s [maximum number of groups exceeded]\n", name);
     return;
@@ -447,27 +450,29 @@ static inline uint16_t parse_argv(const int argc, const char** argv) {
   for (int i = 1; i < argc; ++i) {
     // [...] denotes a group
     size_t arg_len = strnlen(argv[i], MAX_GROUP_NAME_LEN);
-    if (argv[i][0] == '[' && argv[i][arg_len - 1] == ']') {
+    if (arg_len >= 2 && argv[i][0] == '[' && argv[i][arg_len - 1] == ']') {
       int32_t gid = find_gid(argv[i], arg_len);
       if (gid == -1) {
         printf("Group %s not found\n", argv[i]);
         continue;
       }
 
-      (&groups[gid])->silenced = 0;
+      groups[gid].silenced = 0;
 
       while ((right_idx = find_index(left_idx, 1, &gid, gid_compare)) != -1) {
         swap_tests(&left_idx, &right_idx, &tests_found);
       }
     } else {
       right_idx = find_index(0, 0, argv[i], string_compare);
-      if (swap_tests(&left_idx, &right_idx, &tests_found) == -1)
+      if (swap_tests(&left_idx, &right_idx, &tests_found) == -1) {
         printf("Test '%s' not found\n", argv[i]);
+        continue;
+      }
 
       // unsilence group the test is part of
       int32_t gid = tests[left_idx - 1].gid;
       if (gid != -1 && groups[gid].silenced)
-        (&groups[gid])->silenced = 0;
+        groups[gid].silenced = 0;
     }
   }
 
