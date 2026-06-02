@@ -9,7 +9,7 @@ Only works on Unix systems.
 
 1. Define macro ```DTEST_IMPL``` at the top of the file
 2. Add ```#include dtest.h``` right after.
-3. Create your test cases, and inside main use the macro ```REGISTER_TEST(test)``` on each of your tests.
+3. Create your test cases using any of the assert macros listed below, and inside main use the macro ```REGISTER_TEST(test)``` on each of your tests.
 
     a. You can create the tests in a separate file by including ```dtest.h``` without defining ```DTEST_IMPL```.
 
@@ -18,6 +18,23 @@ Only works on Unix systems.
 5. Finally, call ```RUN_TESTS()``` or ```RUN_TESTS(argc, argv)```. If argc and argv are provided, user can run only a select number of tests -- or group of tests -- by providing ```test_name``` or ```[group_name]``` as an argument to the program.
 
 [See example file](example_tests.c)
+
+---
+## Provided Asserts:
+- ```ASSERT_TRUE(condition)```
+- ```ASSERT_FALSE(condition)```
+
+
+- ```ASSERT_EQ(a, b)```
+- ```ASSERT_NEQ(a, b)```
+- ```ASSERT_LT(a, b)```
+- ```ASSERT_LTE(a, b)```
+- ```ASSERT_GT(a, b)```
+- ```ASSERT_GTE(a, b)```
+
+
+- ```ASSERT_STR_EQ(a, b)```
+- ```ASSERT_STR_NEQ(a, b)```
 
 ---
 
