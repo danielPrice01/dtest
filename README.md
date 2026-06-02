@@ -9,7 +9,7 @@ Only works on Unix systems.
 
 1. Define macro ```DTEST_IMPL``` at the top of the file
 2. Add ```#include dtest.h``` right after.
-3. Create your test cases, and inside main use the macro ```REGISTER_TEST(test)``` on each of your tests.
+3. Create your test cases using any of the assert macros listed below, and inside main use the macro ```REGISTER_TEST(test)``` on each of your tests.
 
     a. You can create the tests in a separate file by including ```dtest.h``` without defining ```DTEST_IMPL```.
 
@@ -18,6 +18,22 @@ Only works on Unix systems.
 5. Finally, call ```RUN_TESTS()``` or ```RUN_TESTS(argc, argv)```. If argc and argv are provided, user can run only a select number of tests -- or group of tests -- by providing ```test_name``` or ```[group_name]``` as an argument to the program.
 
 [See example file](example_tests.c)
+
+---
+## Provided Asserts:
+### True and False
+- ```ASSERT_TRUE(condition)```
+- ```ASSERT_FALSE(condition)```
+### Comparisons
+- ```ASSERT_EQ(a, b)```
+- ```ASSERT_NEQ(a, b)```
+- ```ASSERT_LT(a, b)```
+- ```ASSERT_LTE(a, b)```
+- ```ASSERT_GT(a, b)```
+- ```ASSERT_GTE(a, b)```
+### String
+- ```ASSERT_STR_EQ(a, b)```
+- ```ASSERT_STR_NEQ(a, b)```
 
 ---
 
@@ -41,8 +57,8 @@ Before ```#include "dtest.h"``` and after ```#define DTEST_IMPL```, you can rede
 #define DTEST_IMPL
 #include "dtest.h"
 
-void foo_test(void) { assert(...) }
-void bar_test(void) { assert(...) }
+void foo_test(void) { ASSERT(...) }
+void bar_test(void) { ASSERT(...) }
 
 int main(void) {
     REGISTER_TEST(foo_test);
@@ -57,7 +73,7 @@ int main(void) {
 #include "dtest.h"
 
 void test_addition_true(void) {
-    assert(1 + 1 == 2);
+    ASSERT_EQ(1 + 1, 2);
 }
 
 void test_runs_beyond_timeout(void) {
