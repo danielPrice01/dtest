@@ -21,18 +21,17 @@ Only works on Unix systems.
 
 ---
 ## Provided Asserts:
+### True and False
 - ```ASSERT_TRUE(condition)```
 - ```ASSERT_FALSE(condition)```
-
-
+### Comparisons
 - ```ASSERT_EQ(a, b)```
 - ```ASSERT_NEQ(a, b)```
 - ```ASSERT_LT(a, b)```
 - ```ASSERT_LTE(a, b)```
 - ```ASSERT_GT(a, b)```
 - ```ASSERT_GTE(a, b)```
-
-
+### String
 - ```ASSERT_STR_EQ(a, b)```
 - ```ASSERT_STR_NEQ(a, b)```
 
