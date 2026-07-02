@@ -374,6 +374,13 @@ int run_tests(const int argc, const char** argv) {
     }
   }
 
+  char divider[81];  // default terminal size is 80 characters
+  for (uint8_t i = 0; i < 80; ++i)
+    divider[i] = '=';
+  divider[80] = '\0';
+
+  printf("\n%s\n", divider);
+
   printf("\nTests passed: [%u/%u]\n\n", tests_passed,
          num_tests - silenced_tests);
 
