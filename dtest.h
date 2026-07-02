@@ -198,7 +198,7 @@ uint16_t num_tests = 0;
 
 Group groups[MAX_GROUPS];
 uint16_t num_groups = 0;
-int16_t curr_group = -1;
+int32_t curr_group = -1;
 
 uint16_t silenced_tests = 0;
 
@@ -393,7 +393,7 @@ void add_test(void (*fn)(void), const char* name) {
     return;
   }
 
-  uint8_t name_len = strnlen(name, MAX_TEST_NAME_LEN);
+  uint8_t name_len = (uint8_t)strnlen(name, MAX_TEST_NAME_LEN);
   if (name_len == MAX_TEST_NAME_LEN) {
     printf("Skipped test %s [name exceeds maximum length]\n", name);
     return;
